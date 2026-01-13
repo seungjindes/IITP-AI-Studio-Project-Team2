@@ -121,14 +121,14 @@ def query_candidate_flights(
       FROM `{table}`
       WHERE
         Date_MSG_Logged BETWEEN start_date AND end_date
-        AND Latitude IS NOT NULL AND Longitude IS NOT NULL AND Altitude IS NOT NULL
+        AND Latitude IS NOT NULL AND Longitude IS NOT NULL AND Altitude IS NOT NULL AND Altitude > 0
         AND FlightID IS NOT NULL
         {hex_filter}
     ),
     ordered AS (
       SELECT
         HexIdent, FlightID, ts,
-        TIMESTAMP_DIFF(ts, LAG(ts) OVER(PARTITION BY FlightID ORDER BY ts), SECOND) AS dt_sec
+        TIMESTAMP_DIFF(ts, LAG(ts) OVER(PARTITION BY HexIdent, FlightID ORDER BY ts), SECOND) AS dt_sec
       FROM base
     ),
     stats AS (

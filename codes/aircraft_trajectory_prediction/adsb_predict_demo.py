@@ -173,23 +173,29 @@ def preprocess_3d(
     quiet: bool
 ) -> pd.DataFrame:
     """
-    Strict 3D preprocessing.
-    Output MUST have non-null lat/lon/alt rows.
+    Make preprocessing consistent with the working FlightID pipeline.
 
-    Note:
-    - If Altitude is always NULL or always 0 and you consider that "unusable", we will detect and fail.
+    Key changes:
+    - Do NOT drop duplicate timestamps (that can kill valid data).
+    - Aggregate duplicates by timestamp using mean().
+    - Treat Altitude==0 as missing and interpolate.
     """
     if df_raw.empty:
         return df_raw
 
     d = df_raw.copy()
     d["ts"] = pd.to_datetime(d["ts"], utc=True, errors="coerce")
-    d = d.dropna(subset=["ts"])
-    d = d.drop_duplicates(subset=["ts"]).sort_values("ts").set_index("ts")
+    d = d.dropna(subset=["ts"]).sort_values("ts").set_index("ts")
 
     # Force numeric
     for c in ["Latitude", "Longitude", "Altitude"]:
         d[c] = pd.to_numeric(d[c], errors="coerce")
+
+    # Keep only coords
+    d = d[["Latitude", "Longitude", "Altitude"]]
+
+    # ✅ 핵심: 중복 ts를 drop 하지 말고 집계
+    d = d.groupby(level=0).mean(numeric_only=True)
 
     # Basic sanity for lat/lon
     d = d[(d["Latitude"].between(-90, 90)) & (d["Longitude"].between(-180, 180))]
@@ -202,25 +208,29 @@ def preprocess_3d(
 
     rs = resample.replace("S", "s")
 
-    # Keep only numeric columns before resample
-    d = d[["Latitude", "Longitude", "Altitude"]]
+    # Treat altitude==0 as missing (optional but helps your dataset)
+    d["Altitude"] = d["Altitude"].mask(d["Altitude"] == 0, np.nan)
 
-    # Resample numeric only
+    # Resample
     d = d.resample(rs).mean(numeric_only=True)
 
-    # Fill only small gaps
-    d = d.interpolate(method="time", limit=interp_limit, limit_direction="both")
+    # Interpolate small gaps for lat/lon
+    d[["Latitude", "Longitude"]] = d[["Latitude", "Longitude"]].interpolate(
+        method="time", limit=interp_limit, limit_direction="both"
+    )
+
+    # Altitude: interpolate then fill edges (prevents "all dropped")
+    d["Altitude"] = d["Altitude"].interpolate(method="time", limit_direction="both").ffill().bfill()
 
     # Smooth
     for c in ["Latitude", "Longitude", "Altitude"]:
         d[c] = d[c].rolling(smooth_w, center=True, min_periods=1).mean()
 
-    # Strict: require all three
     d3 = d.dropna(subset=["Latitude", "Longitude", "Altitude"]).reset_index()
 
     if not quiet:
         if len(d3) == 0:
-            print(f"[Preprocess3D] produced 0 rows after strict dropna(lat/lon/alt).")
+            print("[Preprocess3D] produced 0 rows after dropna(lat/lon/alt).")
         else:
             alt = d3["Altitude"].to_numpy(np.float32)
             span = float(alt.max() - alt.min())
