@@ -37,6 +37,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
+import os
+
 
 # =========================
 # Defaults (can override via CLI)
@@ -58,7 +60,7 @@ RESAMPLE_DEFAULT = "5S"
 SMOOTH_W_DEFAULT = 3
 WINDOW_DEFAULT = 10
 BATCH_SIZE_DEFAULT = 256
-EPOCHS_DEFAULT = 30
+EPOCHS_DEFAULT = 10
 LR_DEFAULT = 1e-3
 HIDDEN_SIZE_DEFAULT = 80
 NUM_LAYERS_DEFAULT = 1
@@ -347,7 +349,18 @@ def compute_metrics(pred: np.ndarray, true: np.ndarray) -> Tuple[np.ndarray, np.
     return mse, mae, mape
 
 
-def plot_results(true_coords: np.ndarray, pred_coords: np.ndarray, title_suffix: str) -> None:
+def plot_results(true_coords: np.ndarray, pred_coords: np.ndarray, title_suffix: str, out_dir: str, no_show: bool) -> None:
+    os.makedirs(out_dir, exist_ok=True)
+
+    safe_name = (
+        title_suffix.replace(" ", "_")
+        .replace("=", "-")
+        .replace("|", "_")
+        .replace("/", "_")
+        .replace(":", "_")
+    )
+
+    # Lat/Lon plot
     plt.figure()
     plt.plot(true_coords[:, 1], true_coords[:, 0], label="True (withheld)")
     plt.plot(pred_coords[:, 1], pred_coords[:, 0], label="Pred (rolling)")
@@ -355,8 +368,15 @@ def plot_results(true_coords: np.ndarray, pred_coords: np.ndarray, title_suffix:
     plt.title(f"Trajectory (Lat/Lon) - {title_suffix}")
     plt.xlabel("Longitude")
     plt.ylabel("Latitude")
-    plt.show()
 
+    traj_path = os.path.join(out_dir, f"trajectory_{safe_name}.png")
+    plt.savefig(traj_path, dpi=150, bbox_inches="tight")
+    if not no_show:
+        plt.show()
+    plt.close()
+    print(f"[Saved] {traj_path}")
+
+    # Altitude plot (only if 3D)
     if true_coords.shape[1] == 3:
         plt.figure()
         plt.plot(true_coords[:, 2], label="True Alt (withheld)")
@@ -365,8 +385,13 @@ def plot_results(true_coords: np.ndarray, pred_coords: np.ndarray, title_suffix:
         plt.title(f"Altitude - {title_suffix}")
         plt.xlabel("Step")
         plt.ylabel("Altitude")
-        plt.show()
 
+        alt_path = os.path.join(out_dir, f"altitude_{safe_name}.png")
+        plt.savefig(alt_path, dpi=150, bbox_inches="tight")
+        if not no_show:
+            plt.show()
+        plt.close()
+        print(f"[Saved] {alt_path}")
 
 # =========================
 # CLI
@@ -401,6 +426,8 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--alt-pos-min-ratio", type=float, default=ALT_POSITIVE_MIN_RATIO_DEFAULT)
     p.add_argument("--alt-span-min", type=float, default=ALT_SPAN_MIN_DEFAULT)
+    p.add_argument("--out-dir", default=".", help="Directory to save plots")
+    p.add_argument("--no-show", action="store_true", help="Do not call plt.show(); only save files")
     return p.parse_args()
 
 
@@ -493,8 +520,7 @@ def main() -> None:
     print("  MAPE%:", mape)
 
     title = f"HexIdent={chosen_hexident} FlightID={chosen_flight_id} | dims={dims} | resample={args.resample} | window={args.window}"
-    plot_results(true, pred, title_suffix=title)
-
+    plot_results(true, pred, title_suffix=title, out_dir=args.out_dir, no_show=args.no_show)
 
 if __name__ == "__main__":
     main()

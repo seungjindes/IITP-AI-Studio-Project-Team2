@@ -477,7 +477,7 @@ def main() -> None:
         )
 
     loader = DataLoader(SeqDataset(X_train, y_train), batch_size=args.batch_size, shuffle=True)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 
     if not args.quiet:
         print(f"\n[Train] device={device} | windows={len(X_train):,} | resample={args.resample} | window={args.window}")
