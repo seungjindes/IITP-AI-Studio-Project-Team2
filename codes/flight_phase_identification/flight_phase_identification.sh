@@ -1,0 +1,1 @@
+python mid2_phase.py --credentials="/Users/zheedong/Documents/University_Study_Material/대학 공부/수업 용 학습 자료/2025-2 CMU/AI Studio Project/IITP-AI-Studio-Project-Team2/iitp-class-team-2-473114-beb5219efadc.json"
