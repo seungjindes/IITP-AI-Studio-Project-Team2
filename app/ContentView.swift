@@ -8,11 +8,11 @@ import CoreLocation
 struct Flight: Identifiable {
     let id = UUID()
 
-    // ✅ 화면 표시용 (AA0021 또는 사용자가 입력한 것)
+    // ✅ Display ID (AA0021 or user input)
     var displayId: String
 
-    // ✅ 서버 조회용 hex (실데이터일 때만 존재)
-    // AA0021 더미일 때는 nil
+    // ✅ Server query hex (only exists for real data)
+    // nil for AA0021 dummy
     var hexKey: String?
 
     var originName: String
@@ -65,7 +65,7 @@ struct ContentView: View {
     @State private var isChatPresented: Bool = false
     @State private var chatInput: String = ""
     @State private var messages: [ChatMessage] = [
-        ChatMessage(isUser: false, text: "Hi! Ask me things like “나 지금 어디야?”", time: Date())
+        ChatMessage(isUser: false, text: "Hello! 👋 Feel free to ask me anything about your flight!", time: Date())
     ]
 
     private var isLive: Bool { currentFlight != nil && mapMode == .follow }
@@ -424,9 +424,10 @@ struct ContentView: View {
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        suggestionChip("나 지금 어디야?")
-                        suggestionChip("Status 뭐야?")
-                        suggestionChip("남은 시간 알려줘")
+                        suggestionChip("Where am I now?")
+                        suggestionChip("When will I arrive?")
+                        suggestionChip("How much time left?")
+                        suggestionChip("What's the flight status?")
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
@@ -491,7 +492,7 @@ struct ContentView: View {
         let clean = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let upper = clean.uppercased()
 
-        // ✅ AA0021만 더미로 동작
+        // ✅ Only AA0021 runs as dummy
         if upper == "AA0021" {
             loadDummyFlightAA0021()
             hasSearchedSuccessfully = true
@@ -573,7 +574,7 @@ struct ContentView: View {
 
         currentFlight = Flight(
             displayId: "AA0021",
-            hexKey: nil, // ✅ 더미!
+            hexKey: nil, // ✅ Dummy!
             originName: "NYC",
             originCoord: nyc,
             destName: "PIT",
@@ -601,10 +602,10 @@ struct ContentView: View {
         tickCount += 1
 
         if flight.hexKey == nil {
-            // ✅ 더미면 기존 시뮬레이션
+            // ✅ Dummy mode: use simulation
             simulateIncomingTrackPoint(for: flight)
         } else {
-            // ✅ 실데이터면 5초마다 서버에서 최신 포인트
+            // ✅ Real data: fetch latest point from server every 5 seconds
             if tickCount % 5 == 0, let hex = flight.hexKey {
                 Task {
                     do {
@@ -615,14 +616,14 @@ struct ContentView: View {
                             currentFlight?.lastUpdate = Date()
                         }
                     } catch {
-                        // 원하면 상태바에 찍기:
+                        // Optional: show error in status bar
                         // await MainActor.run { searchStatus = "⚠️ \(error.localizedDescription)" }
                     }
                 }
             }
         }
 
-        // 남은 시간 카운트다운(더미용 느낌)
+        // Countdown remaining time (for dummy mode)
         if flight.hexKey == nil {
             if let remain = currentFlight?.remainingSeconds, remain > 0 {
                 currentFlight?.remainingSeconds = max(0, remain - 1)
@@ -796,37 +797,58 @@ struct ContentView: View {
         return s
     }
 
-    // MARK: - Chat logic
+    // MARK: - Chat logic (Gemini AI Integration)
 
     private func sendChat() {
         let userText = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !userText.isEmpty else { return }
 
+        // 사용자 메시지 추가
         messages.append(ChatMessage(isUser: true, text: userText, time: Date()))
         chatInput = ""
 
-        let reply = generateReply(for: userText)
-        messages.append(ChatMessage(isUser: false, text: reply, time: Date()))
-    }
+        // "Thinking..." temporary message
+        let thinkingMessage = ChatMessage(isUser: false, text: "🤔 Thinking...", time: Date())
+        messages.append(thinkingMessage)
 
-    private func generateReply(for text: String) -> String {
-        let lower = text.lowercased()
+        // Gemini API call (async)
+        Task {
+            do {
+                // Create flight context
+                let context: FlightContext? = {
+                    guard let flight = currentFlight, let plane = trackPoints.last else {
+                        return nil
+                    }
+                    return FlightContext.from(flight: flight, currentCoord: plane)
+                }()
 
-        guard let flight = currentFlight, let plane = trackPoints.last else {
-            return "먼저 항공편을 검색해줘! (AA0021 또는 hex 예: 71c218)"
-        }
+                // Ask Gemini
+                let reply = try await ChatBotClient.shared.sendMessage(userText, flightContext: context)
 
-        if lower.contains("status") || lower.contains("상태") {
-            return "현재 상태는 \(flight.statusText)로 표시되고 있어요."
-        }
-        if lower.contains("어디") || lower.contains("where") {
-            return "현재 좌표는 (\(String(format: "%.4f", plane.latitude)), \(String(format: "%.4f", plane.longitude))) 근처 상공이에요."
-        }
-        if lower.contains("남은") || lower.contains("remaining") {
-            return "남은 시간은 \(timeRemainingText(flight.remainingSeconds)) 정도예요."
-        }
+                // UI update
+                await MainActor.run {
+                    // Remove "Thinking..." message
+                    if let lastIndex = messages.lastIndex(where: { $0.id == thinkingMessage.id }) {
+                        messages.remove(at: lastIndex)
+                    }
+                    // Add actual response
+                    messages.append(ChatMessage(isUser: false, text: reply, time: Date()))
+                }
 
-        return "예: “나 지금 어디야?”, “Status 뭐야?”, “남은 시간 알려줘” 같이 물어봐줘 🙂"
+            } catch {
+                // Error handling - user-friendly message
+                await MainActor.run {
+                    // Remove "Thinking..." message
+                    if let lastIndex = messages.lastIndex(where: { $0.id == thinkingMessage.id }) {
+                        messages.remove(at: lastIndex)
+                    }
+                    // Show friendly error message (detailed error only in console)
+                    print("❌ Chatbot Error: \(error.localizedDescription)")
+                    let errorMsg = "Sorry, I'm having trouble answering right now. Please try again in a moment."
+                    messages.append(ChatMessage(isUser: false, text: errorMsg, time: Date()))
+                }
+            }
+        }
     }
 
     // MARK: - Smoothing

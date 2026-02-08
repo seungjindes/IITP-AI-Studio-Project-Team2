@@ -1,3 +1,12 @@
 .DS_Store
 __pycache__/
 iitp-class-team-2-473114-beb5219efadc.json
+
+# API Keys Configuration (보안 중요!)
+app/Config.swift
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
+.DS_Store
